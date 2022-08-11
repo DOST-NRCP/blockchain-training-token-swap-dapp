@@ -29,6 +29,20 @@
           <button type="submit">Create Swap</button>
         </form>
       </div>
+
+      <div v-for="(swapOffer, index) in swapOffers" :key="index" class="swap-card">
+          <div>Swap offer by: {{ swapOffer.creator }}</div>
+          <div v-if="swapOffer.swapType === 0">
+              {{ swapOffer.fromTokens }} Token A 
+              for {{ swapOffer.toTokens }} Token B
+          </div>
+
+          <div v-else-if="swapOffer.swapType === 1">
+              {{ swapOffer.fromTokens }} Token B 
+              for {{ swapOffer.toTokens }} Token A
+          </div>
+          <button v-if="!swapOffer.isSwapped" @click="fulfillSwap(swapOffer)">Swap</button>
+      </div>
     </div>
   </div>  
 </template>
@@ -59,6 +73,7 @@ export default {
       tokenB: null,
       tokenABalance: 0,
       tokenBBalance: 0,
+      swapOffers: []
     }
   },
   methods: {
@@ -78,6 +93,8 @@ export default {
 
       this.tokenABalance = 0
       this.tokenBBalance = 0
+
+      this.swapOffers = []
     },
     createContractInstances() {
       this.tokenSwap = new ethers.Contract(tokenSwapAddress, tokenSwapAbi)
@@ -90,6 +107,7 @@ export default {
       this.tokenB  = this.tokenB.connect(this.provider)
 
       this.getTokenBalances()
+      this.getSwapsList()
     },
     async getTokenBalances() {
       const _tokenABalance = await this.tokenA.balanceOf(this.accounts[0])
@@ -135,11 +153,63 @@ export default {
 
         this.errorMessage = ''
         this.getTokenBalances()
+        this.getSwapsList()
 
       } catch (error) {
         this.errorMessage = error.data.data.reason || error.data.message
       }
-    }
+    },
+    async getSwapsList(){
+      const swapsLength = await this.tokenSwap.getSwapsLength()
+      this.swapOffers = []
+      for(let i = 0; i < swapsLength; i++ ) {
+        const _swap = await this.tokenSwap.swaps(i)
+        const swap = {
+          swapType: _swap.swapType,
+          creator: _swap.creator,
+          swappedBy: _swap.swappedBy,
+          amountFrom: _swap.amountFrom,
+          amountTo: _swap.amountTo,
+          isSwapped: _swap.isSwapped,
+        }        
+        swap.swapIndex = i
+        swap.fromTokens = utils.formatUnits(swap.amountFrom, 18)
+        swap.toTokens = utils.formatUnits(swap.amountTo, 18)
+        this.swapOffers.push(swap)
+      }
+    },
+    async fulfillSwap(swapOffer) {
+      const signer = this.provider.getSigner()
+      const tokenSwapWithSigner = this.tokenSwap.connect(signer)
+      
+      let tokenTo
+      if(swapOffer.swapType === 0) {
+        tokenTo = this.tokenA
+      } else {
+        tokenTo = this.tokenB
+      }
+
+      const tokenToWithSigner = tokenTo.connect(signer)
+
+      try {
+
+        const approveTx = await tokenToWithSigner.approve(
+          this.tokenSwap.address,
+          swapOffer.amountTo
+        )
+        await approveTx.wait()
+
+        const transaction = await tokenSwapWithSigner.swap(swapOffer.swapIndex)
+        await transaction.wait()
+
+        this.errorMessage = ''
+        this.getTokenBalances()
+        this.getSwapsList()
+
+      } catch (error) {
+        this.errorMessage = error.data.data.reason || error.data.message
+      }
+    } 
   },
 }
 </script>
@@ -174,5 +244,12 @@ label {
   margin: 10px 0px;
   padding: 5px 3px;
   width: 90%;
+}
+
+.swap-card {
+  color:white;
+  border: #f5f5f5 solid 1px;
+  margin: 5px 0px;
+  padding: 5px 0px;
 }
 </style>
